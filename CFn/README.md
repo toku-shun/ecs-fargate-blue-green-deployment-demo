@@ -6,7 +6,7 @@ Fargateに対して、Blue/Greenデプロイメントパイプラインを構築
 なお、SourceステージはGitHub、パイプラインはAWS CodePipelineを用いて構築します。
 
 ## ファイル構成
-
+```[text]
 .
 ├── README.md
 ├── cicd-blue-green.yaml // Blue/Green Deploy用のパイプライン構築
@@ -20,7 +20,7 @@ Fargateに対して、Blue/Greenデプロイメントパイプラインを構築
     ├── system_dev_ecr-blue-green_parameter.json
     ├── system_dev_ecs-blue-green_parameter.json
     └── system_dev_vpc_parameter.json
-
+```
 ## 構成図面
 
 ![Blue/Green Deployment](./images/BlueGreenDeployment.png)
