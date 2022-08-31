@@ -1,0 +1,674 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 
+  Blue Green Update For ECS Fargate with GitHub
+
+Metadata:
+  "AWS::CloudFormation::Interface":
+    ParameterGroups:
+      - Label:
+          default: "System Configuration"
+        Parameters:
+          - Environment
+          - SystemtName
+      - Label:
+          default: "VPC Configuration"
+        Parameters:
+          - VpcId
+          - CodeBuildSubnetId1
+          - CodeBuildSubnetId2
+      - Label:
+          default: "ECR・ECS Configuration"
+        Parameters:
+          - ECSClusterName
+          - ECSServiceName
+          - ECSTaskContainerName
+          - ECRName
+      - Label:
+          default: "GitHub Configuration"
+        Parameters:
+          - GitHubOrganizationName
+          - GitHubRepositoryName
+          - GitHubBranchName
+      - Label:
+          default: "Blue/Green Configuration"
+        Parameters:
+          - TargetGroupBlueName
+          - TargetGroupGreenName
+          - ListenerBlueArn
+          - ListenerGreenArn
+
+Parameters:
+  Environment:
+    Default: dev
+    Type: String
+  SystemName:
+    Default: system
+    Type: String
+
+  ECSClusterName:
+    Default: system-dev-blgr-cluster
+    Description : "CI/CD Deploy ECS Cluster"
+    Type: String
+  ECSServiceName:
+    Default: system-dev-blgr-service
+    Description : "CI/CD Deploy ECS Service"
+    Type: String
+  ECSTaskContainerName:
+    Default: app-container
+    Description : "CI/CD Deploy ECS Task Container"
+    Type: String
+  ECRName:
+    Default: system-dev-blgr-repo
+    Description : "ECR Repository Name"
+    Type: String
+  GitHubOrganizationName:
+    Default: GitHubOrganizationName
+    Description : "CI/CD GitHub Organization"
+    Type: String
+  GitHubRepositoryName:
+    Default: GitHubRepositoryName
+    Description : "CI/CD GitHub Repository"
+    Type: String
+  GitHubBranchName:
+    Default: GitHubBranchName
+    Description : "CI/CD GitHub Branch"
+    Type: String
+  VpcId:
+    Default: vpc-
+    Description : "VPC ID"
+    Type: AWS::EC2::VPC::Id
+  CodeBuildSubnetId1:
+    Default: subnet-private1Id
+    Description : "Private Subnet 1st"
+    Type: AWS::EC2::Subnet::Id
+  CodeBuildSubnetId2:
+    Default: subnet-private2Id
+    Description : "Private Subnet 2nd"
+    Type: AWS::EC2::Subnet::Id
+  TargetGroupBlueName:
+    Default: system-dev-blgr-tg-blue
+    Description : "Target Group Blue Name"
+    Type: String
+  TargetGroupGreenName:
+    Default: system-dev-blgr-tg-green
+    Description : "Target Group Green Name"
+    Type: String
+  ListenerBlueArn:
+    Default: ListenerBlueArn
+    Description : "Listener Blue Arn"
+    Type: String
+  ListenerGreenArn:
+    Default: ListenerGreenArn
+    Description : "Listener Green Arn"
+    Type: String
+
+
+Resources:
+# ------------------------------------------------------------#
+#  Security Group
+# ------------------------------------------------------------#
+
+  CodeBuildSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Blue Green Deploy CodeBuild Security Group
+      GroupName: !Sub "${SystemName}-${Environment}-blgr-code-build-sg"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: !Sub "${SystemName}-${Environment}-blgr-code-build-sg"
+      - Key: Systemname
+        Value: !Sub "${SystemName}"
+      - Key: Environment
+        Value: !Sub "${Environment}"
+
+# ------------------------------------------------------------#
+#  CICD Role
+# ------------------------------------------------------------#
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-${Environment}-blgr-cicd-build-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: Name
+          Value: !Sub "${SystemName}-${Environment}-blgr-cicd-build-role"
+        - Key: SystemName
+          Value: !Sub "${SystemName}"
+        - Key: Environment
+          Value: !Sub "${Environment}"
+  CodeBuildServicePolicy:
+    DependsOn: CodePipelineServiceRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${SystemName}-${Environment}-blgr-cicd-build-policy"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Resource: "*"
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+          - Resource: !Sub arn:aws:s3:::${BLGRArtifactBucket}/*
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:GetObjectVersion
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+          - Resource: "*"
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetRepositoryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchGetImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+          - Resource: "*"
+            Effect: Allow
+            Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeDhcpOptions
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeVpcs
+          - Resource: "*"
+            Effect: Allow
+            Action:
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeDhcpOptions
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeVpcs
+              - ec2:CreateNetworkInterfacePermission
+          - Resource: "*"
+            Effect: Allow
+            Action:
+              - codestar-connections:UseConnection
+      Roles:
+        - !Ref CodeBuildServiceRole
+
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-${Environment}-blgr-cicd-deploy-role"
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-${Environment}-blgr-cicd-pipeline-role"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: Name
+          Value: !Sub "${SystemName}-${Environment}-blgr-cicd-build-role"
+        - Key: SystemName
+          Value: !Sub "${SystemName}"
+        - Key: Environment
+          Value: !Sub "${Environment}"  
+  CodePipelineServicePolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: CodePipelineServiceRole
+    Properties:
+      PolicyName: !Sub "${SystemName}-${Environment}-blgr-cicd-pipeline-policy"
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Resource:
+              - !Sub arn:aws:s3:::${BLGRArtifactBucket}/*
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:GetBucketVersioning
+          - Resource: "*"
+            Effect: Allow
+            Action:
+              - codecommit:GetRepository
+              - codecommit:ListBranches
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:UploadArchive
+              - codecommit:CancelUploadArchive
+              - codedeploy:CreateDeployment
+              - codedeploy:GetApplication
+              - codedeploy:GetApplicationRevision
+              - codedeploy:GetDeployment
+              - codedeploy:GetDeploymentConfig
+              - codedeploy:RegisterApplicationRevision
+              - codebuild:StartBuild
+              - codebuild:StopBuild
+              - codebuild:BatchGet*
+              - codebuild:Get*
+              - codebuild:List*
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - s3:*
+              - ecs:*
+              - elasticloadbalancing:*
+              - autoscaling:*
+              - iam:PassRole
+              - codestar-connections:UseConnection
+      Roles:
+        - !Ref CodePipelineServiceRole
+
+# ------------------------------------------------------------#
+# IAMRole For CustomResource Lambda
+# ------------------------------------------------------------#
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-${Environment}-blgr-deploy-groupe-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSCodeDeployFullAccess
+      Tags:
+        - Key: Name
+          Value: !Sub "${SystemName}-${Environment}-blgr-deploy-groupe-lambda-role"
+        - Key: SystemName
+          Value: !Sub "${SystemName}"
+        - Key: Environment
+          Value: !Sub "${Environment}" 
+  LambdaPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub "${SystemName}-${Environment}-blgr-cicd-build-policy"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:*
+              - logs:*
+            Resource: '*'
+          - Effect: Allow
+            Resource: '*'
+            Action:
+              - iam:PassRole
+            Condition:
+              StringEqualsIfExists:
+                iam:PassedToService:
+                  - codedeploy.amazonaws.com
+      Roles:
+        - !Ref LambdaRole
+
+# ------------------------------------------------------------#
+#  Blue Green Artifact S3 Bucket
+# ------------------------------------------------------------#
+  BLGRArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${SystemName}-${Environment}-blgr-cicd-artifact-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        IgnorePublicAcls: TRUE
+        RestrictPublicBuckets: TRUE
+      LifecycleConfiguration:
+        Rules:
+          - Id: !Sub "${SystemName}-${Environment}-blgr-cicd-build-artifact-lifecycle"
+            Status: Enabled
+            ExpirationInDays: 400
+      Tags:
+      - Key: Name
+        Value: !Sub "${SystemName}-${Environment}-blgr-cicd-artifact-${AWS::AccountId}"
+      - Key: SystemName
+        Value: !Sub "${SystemName}"
+      - Key: Environment
+        Value: !Sub "${Environment}"
+
+# ------------------------------------------------------------#
+#  GitHub Connection
+# ------------------------------------------------------------#
+  GitHubConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Properties:
+      ConnectionName: !Sub "${SystemName}-${Environment}-blgr-cicd-github"
+      ProviderType: GitHub
+      Tags:
+      - Key: Name
+        Value: !Sub "${SystemName}-${Environment}-blgr-cicd-github"
+      - Key: SystemName
+        Value: !Sub "${SystemName}"
+      - Key: Environment
+        Value: !Sub "${Environment}"
+
+# ------------------------------------------------------------#
+#  Code Build LogGroup
+# ------------------------------------------------------------#
+  CodeBuildLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: !Sub "${SystemName}-${Environment}-blgr-cicd-code-build"
+
+# ------------------------------------------------------------#
+#  Code Build
+# ------------------------------------------------------------#
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn: CodeBuildServicePolicy
+    Properties:
+      Name: !Sub "${SystemName}-${Environment}-blgr-cicd-code-build"
+      Environment:
+        PrivilegedMode: true
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: "aws/codebuild/amazonlinux2-x86_64-standard:3.0"
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: AWS_REGION
+            Value: !Ref AWS::Region
+          - Name: REPOSITORY_URI
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRName}
+          - Name: ECSTaskContainerName
+            Value: !Ref ECSTaskContainerName
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          env:
+            variables:
+              DOCKER_BUILDKIT: "1"
+          phases:
+            install:
+              runtime-versions:
+                docker: 19
+            pre_build:
+              commands:
+                - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
+                - echo Logging in to ECR
+                - aws ecr --region ${AWS_REGION} get-login-password | docker login --username AWS --password-stdin https://${REPOSITORY_URI}
+                - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+                - IMAGE_TAG=${COMMIT_HASH:=latest}
+            build:
+              commands:
+                - echo Build started on `date`
+                - docker image build -t ${REPOSITORY_URI}:${COMMIT_HASH} .
+            post_build:
+              commands:
+                - echo Build completed on `date`
+                - echo Pushing the Docker images
+                - docker image push ${REPOSITORY_URI}:${COMMIT_HASH}
+                - printf '{"ImageURI":"%s"}' ${REPOSITORY_URI}:${COMMIT_HASH} > imageDetail.json
+          artifacts:
+              files: imageDetail.json      
+      ServiceRole: !Ref CodeBuildServiceRole
+      Cache: 
+        Modes: 
+          - "LOCAL_DOCKER_LAYER_CACHE"
+          - "LOCAL_SOURCE_CACHE"
+        Type: "LOCAL"
+      LogsConfig: 
+        CloudWatchLogs:
+          Status: "ENABLED"
+          GroupName: !Ref CodeBuildLogGroup
+      Visibility: "PRIVATE"
+      TimeoutInMinutes: 60
+      QueuedTimeoutInMinutes: 480
+      VpcConfig:
+        SecurityGroupIds: 
+          - !Ref CodeBuildSecurityGroup
+        Subnets: 
+          - !Ref CodeBuildSubnetId1
+          - !Ref CodeBuildSubnetId2
+        VpcId: !Ref VpcId
+      Tags:
+      - Key: Name
+        Value: !Sub "${SystemName}-${Environment}-blgr-cicd-build"
+      - Key: SystemName
+        Value: !Sub "${SystemName}"
+      - Key: Environment
+        Value: !Sub "${Environment}"
+
+# ------------------------------------------------------------#
+# Lambda for Create Blue Green Deployment Group
+# ------------------------------------------------------------#
+  LambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    DeletionPolicy: 'Delete'
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import logging
+          import cfnresponse
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          client = boto3.client('codedeploy')
+
+          def lambda_handler(event, context):
+
+              appName = event['ResourceProperties']['appName']
+              deploymentGroup = event['ResourceProperties']['deploymentGroup']
+              clusterName = event['ResourceProperties']['ECSClusterName']
+              serviceName = event['ResourceProperties']['ECSServiceName']
+
+              print('REQUEST RECEIVED:\n' + json.dumps(event))
+              responseData = {}
+              try:
+                res = client.create_application(
+                    applicationName=appName,
+                    computePlatform='ECS'
+                )
+                logger.info(res)
+                logger.info("SUCCESS: CodeDeploy Application created.")
+                res = client.create_deployment_group(
+                    applicationName=appName,
+                    deploymentGroupName=deploymentGroup,
+                    deploymentConfigName='CodeDeployDefault.ECSAllAtOnce',
+                    serviceRoleArn=event['ResourceProperties']['CodeDeployServiceRoleArn'],
+                    autoRollbackConfiguration={
+                        'enabled': True,
+                        'events': [
+                            'DEPLOYMENT_FAILURE',
+                        ]
+                    },
+                    deploymentStyle={
+                        'deploymentType': 'BLUE_GREEN',
+                        'deploymentOption': 'WITH_TRAFFIC_CONTROL'
+                    },
+                    blueGreenDeploymentConfiguration={
+                        'terminateBlueInstancesOnDeploymentSuccess': {
+                            'action': 'TERMINATE',
+                            'terminationWaitTimeInMinutes': 5
+                        },
+                        'deploymentReadyOption': {
+                            'actionOnTimeout': 'STOP_DEPLOYMENT',
+                            'waitTimeInMinutes': 5
+                        }
+                    },
+                    loadBalancerInfo={
+                        'targetGroupPairInfoList': [
+                            {
+                                'targetGroups': [
+                                    {
+                                        'name': event['ResourceProperties']['TargetGroup1']
+                                    },
+                                    {
+                                        'name': event['ResourceProperties']['TargetGroup2']
+                                    },
+                                ],
+                                'prodTrafficRoute': {
+                                    'listenerArns': [
+                                        event['ResourceProperties']['ALBListener1'],
+                                    ]
+                                },
+                                'testTrafficRoute': {
+                                    'listenerArns': [
+                                        event['ResourceProperties']['ALBListener2'],
+                                    ]
+                                }
+                            },
+                        ]
+                    },
+                    ecsServices=[
+                        {
+                            'serviceName': event['ResourceProperties']['ECSServiceName'],
+                            'clusterName': event['ResourceProperties']['ECSClusterName']
+                        },
+                    ]
+                )
+              except ClientError as e:
+                  logger.error("ERROR: Something error!")
+                  logger.error(e)
+                  responseData = {'error': str(e)}
+                  cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
+              else:
+                  logger.info(res)
+                  logger.info(
+                      "SUCCESS: CodeDeploy Application and DeploymentGroup created.")
+                  return cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.8
+      Timeout: 10
+# ------------------------------------------------------------#
+# Custom Resource
+# ------------------------------------------------------------#
+  CreateCodeDeploy:
+    Type: Custom::CreateCodeDeploy
+    DependsOn:
+      - CodeDeployServiceRole
+    Properties:
+      ServiceToken: !GetAtt LambdaFunction.Arn
+      Region: !Ref AWS::Region
+      ECSClusterName: !Ref ECSClusterName
+      ECSServiceName: !Ref ECSServiceName
+      CodeDeployServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
+      TargetGroup1: !Ref TargetGroupBlueName
+      TargetGroup2: !Ref TargetGroupGreenName
+      ALBListener1: !Ref ListenerBlueArn
+      ALBListener2: !Ref ListenerGreenArn
+      appName: !Sub "${SystemName}-${Environment}-blgr-app"
+      deploymentGroup: !Sub "${SystemName}-${Environment}-blgr-deployment-group"
+
+# ------------------------------------------------------------#
+#  Code Pipeline
+# ------------------------------------------------------------#
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    DependsOn: CodePipelineServicePolicy
+    Properties:
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      Name: !Sub "${SystemName}-${Environment}-blgr-cicd-pipeline"
+      ArtifactStore:
+        Type: S3
+        Location: !Ref BLGRArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeStarSourceConnection
+              Configuration:
+                FullRepositoryId: !Sub
+                  - ${GitHubOrganizationName}/${GitHubRepositoryName}
+                  - GitHubOrganizationName: !Ref GitHubOrganizationName
+                    GitHubRepositoryName: !Ref GitHubRepositoryName
+                ConnectionArn: !Ref GitHubConnection
+                BranchName: !Ref GitHubBranchName
+              RunOrder: 1
+              OutputArtifacts:
+                - Name: SourceArtifact
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 1
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CodeDeployToECS
+              Configuration:
+                AppSpecTemplateArtifact: SourceArtifact
+                AppSpecTemplatePath: appspec.yaml
+                TaskDefinitionTemplateArtifact: SourceArtifact
+                TaskDefinitionTemplatePath: !Sub "${SystemName}-${Environment}-taskdef.json"
+                ApplicationName: !Sub "${SystemName}-${Environment}-blgr-app"
+                DeploymentGroupName: !Sub "${SystemName}-${Environment}-blgr-deployment-group"
+                Image1ArtifactName:  BuildArtifact
+                Image1ContainerName: IMAGE1_NAME
+              RunOrder: 1
+              InputArtifacts:
+                - Name: SourceArtifact
+                - Name:  BuildArtifact
+              Region: !Ref AWS::Region
+      Tags:
+      - Key: Name
+        Value: !Sub "${SystemName}-${Environment}-blgr-cicd-pipeline"
+      - Key: SystemName
+        Value: !Sub "${SystemName}"
+      - Key: Environment
+        Value: !Sub "${Environment}"

@@ -1,0 +1,66 @@
+[
+  {
+    "ParameterKey": "CodeBuildSubnetId1",
+    "ParameterValue": "subnet-private1Id"
+  },
+  {
+    "ParameterKey": "CodeBuildSubnetId2",
+    "ParameterValue": "subnet-private2Id"
+  },
+  {
+    "ParameterKey": "ECRName",
+    "ParameterValue": "system-dev-blgr-repo"
+  },
+  {
+    "ParameterKey": "ECSClusterName",
+    "ParameterValue": "system-dev-blgr-cluster"
+  },
+  {
+    "ParameterKey": "ECSServiceName",
+    "ParameterValue": "system-dev-blgr-service"
+  },
+  {
+    "ParameterKey": "ECSTaskContainerName",
+    "ParameterValue": "app-container"
+  },
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "GitHubBranchName",
+    "ParameterValue": "GitHubBranchName"
+  },
+  {
+    "ParameterKey": "GitHubOrganizationName",
+    "ParameterValue": "GitHubOrganizationName"
+  },
+  {
+    "ParameterKey": "GitHubRepositoryName",
+    "ParameterValue": "GitHubRepositoryName"
+  },
+  {
+    "ParameterKey": "ListenerBlueArn",
+    "ParameterValue": "ListenerBlueArn"
+  },
+  {
+    "ParameterKey": "ListenerGreenArn",
+    "ParameterValue": "ListenerGreenArn"
+  },
+  {
+    "ParameterKey": "SystemName",
+    "ParameterValue": "system"
+  },
+  {
+    "ParameterKey": "TargetGroupBlueName",
+    "ParameterValue": "system-dev-blgr-tg-blue"
+  },
+  {
+    "ParameterKey": "TargetGroupGreenName",
+    "ParameterValue": "system-dev-blgr-tg-green"
+  },
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": "vpc-"
+  }
+]
